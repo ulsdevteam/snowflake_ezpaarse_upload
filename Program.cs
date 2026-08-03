@@ -176,7 +176,7 @@ class ProcessEzpaarse
     /// <param name="filepath">full path of the file to be uploaded to snowflake</param>
     /// <returns></returns>
     private static string[] GetCommands(string basename, string filepath) {
-        string deleteExisting1 = $"DELETE FROM EZPAARSE_RESULT_DEPTS WHERE \"recordid\" IN (SELECT \"recordid\" FROM EZPAARSE_RESULTS WHERE \"loadid\" = '{pendingBaseName}')";
+        string deleteExisting1 = $"DELETE FROM EZPAARSE_RESULT_DEPTS WHERE \"recordid\" IN (SELECT \"recordid\" FROM EZPAARSE_RESULTS WHERE \"loadid\" = '{basename}')";
         string deleteExisting2 = $"DELETE FROM EZPAARSE_RESULTS WHERE \"loadid\" = '{basename}';";
         string ezpaarseFormat = """
             CREATE TEMP FILE FORMAT 'ezpaarse_csv' 
@@ -187,12 +187,14 @@ class ProcessEzpaarse
                 DATE_FORMAT = 'YYYY-MM-DD'
         """;
         string stageFile = $"PUT file://{filepath} @~/ezpaarse_staged"; // upload file to snowflake server home of user account
+        // record id is an autoincrement field in oracle, so using uuid as a number.
         string insertContent = $"""
                 COPY INTO EZPAARSE_RESULTS FROM 
                 (SELECT 
+                    --HASH(UUID_STRING()) AS "recordid",
                     $1::CHAR(128) AS "loadid",
-                    $2::TIMESTAMP_TZ AS "datetime",
-                    $3::DATE AS "date",
+                    TO_CHAR($2::TIMESTAMP_TZ) AS "datetime",
+                    TO_CHAR($3::DATE) AS "date",
                     RTRIM(REGEXP_REPLACE($4, "@pitt.edu", ""))::CHAR(17) AS "login",
                     $5::CHAR(64) AS "platform",
                     $6::CHAR(128) AS "platform_name",
@@ -210,11 +212,11 @@ class ProcessEzpaarse
                     $18::CHAR(1) AS "on_campus",
                     $19::CHAR(64) AS "log_id",
                     $20::CHAR(64) AS "ezpaarse_version",
-                    $21::DATE AS "ezpaarse_date",
+                    TO_CHAR($21::DATE) AS "ezpaarse_date",
                     $22::CHAR(64) AS "middlewares_version",
-                    $23::DATE AS "middlewares_date",
+                    TO_CHAR($23::DATE) AS "middlewares_date",
                     $24::CHAR(64) AS "platforms_version",
-                    $25::DATE AS "platforms_date",
+                    TO_CHAR($25::DATE) AS "platforms_date",
                     $26::CHAR(256) AS "middlewares",
                     SUBSTR($27, 1, 1024)::CHAR(1024) AS "title",
                     $28::CHAR(32) AS "type",
