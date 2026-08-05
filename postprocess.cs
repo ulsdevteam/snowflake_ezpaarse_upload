@@ -1,12 +1,21 @@
 using System.Data;
-using Org.BouncyCastle.Cms;
+using System.Text;
 using Snowflake.Data.Client;
 
 public class PostProcess {
         public static void Main() {
+                string? salt_source_env = Environment.GetEnvironmentVariable("USER_HASH_SALT");
+                if (salt_source_env == null)
+                {
+                        Console.WriteLine("Expected environment variable USER_HASH_SALT not found. This is used for creating user hashes in db. Exiting...");
+                        Environment.Exit(0);
+                }
+                string salt_source = salt_source_env.Value; // cast from nullable to string
+                
+                // validate the salt_source somehow since inserting into a complex query
 
                 // translated sql statement from postprocess.sql
-                string exeString = """
+                string exeString = $"""
                 BEGIN
 
                 INSERT INTO EZPAARSE_RESULT_DEPTS
@@ -21,7 +30,7 @@ public class PostProcess {
                         (
                                 SELECT DISTINCT
                                         st.username,
-                                        DATEADD(second, -1, DATEADD(day, 1, cal.full_dt)) AS end_dt, -- do we want period for both employee and student for consistency?
+                                        DATEADD(second, -1, DATEADD(day, 1, cal.full_dt)) AS end_dt, 
                                         DATEADD(day, 1, ADD_MONTHS(cal.full_dt, -1)) AS start_dt,
                                         dp.responsibility_center_cd AS rc_cd,
                                         dp.department_cd,
@@ -87,8 +96,7 @@ public class PostProcess {
 
                 UPDATE EZPAARSE_RESULTS
                 SET "user_hash" = (
-                        SELECT SHA2(s."salt" || EZPAARSE_RESULTS."login")
-                        FROM EZPAARSE_SALT s
+                        SHA2({salt_source} || EZPAARSE_RESULTS."login")
                 )
                 WHERE "user_hash" IS NULL;
 

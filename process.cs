@@ -193,7 +193,7 @@ class ProcessEzpaarse
                 (SELECT 
                     --HASH(UUID_STRING()) AS "recordid",
                     $1::CHAR(128) AS "loadid",
-                    TO_CHAR($2::TIMESTAMP_TZ) AS "datetime",
+                    TO_CHAR ($2::TIMESTAMP_TZ) AS "datetime",
                     TO_CHAR($3::DATE) AS "date",
                     RTRIM(REGEXP_REPLACE($4, "@pitt.edu", ""))::CHAR(17) AS "login",
                     $5::CHAR(64) AS "platform",
