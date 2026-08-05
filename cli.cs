@@ -1,5 +1,4 @@
 
-using Amazon.S3.Internal;
 
 public class CLI
 {
@@ -9,7 +8,7 @@ public class CLI
     }
     public static void Main(string[] args)
     {
-        if (args.Length() != 2)
+        if (args.Length != 2)
         {
             CLI.usage();
         }
@@ -23,6 +22,7 @@ public class CLI
                 break;
             default:
                 usage();
+                break;
         }
         
     }
