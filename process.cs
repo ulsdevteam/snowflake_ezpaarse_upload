@@ -14,7 +14,7 @@ class SnowflakeWrapper
 
     ///<param name="auth_string"> is connection string used for initiating snowflake connection</param>
     public SnowflakeWrapper(string auth_string)
-    {
+    {   
         this.authString = auth_string;
     }
 
@@ -26,6 +26,7 @@ class SnowflakeWrapper
     public bool ExecuteCommandList(string[] commands)
     {
         bool sqlSuccess = true;
+        string executing_command = "";
         try {
             using (IDbConnection conn = new SnowflakeDbConnection())
             {
@@ -37,6 +38,7 @@ class SnowflakeWrapper
                     foreach (string cmdStr in commands)
                     {
                         cmd.CommandText = cmdStr;
+                        executing_command = cmdStr;
                         cmd.ExecuteNonQuery();
                     }
                     conn.Close();
@@ -44,8 +46,10 @@ class SnowflakeWrapper
 
             }
         }
-        catch
+        catch (SnowflakeDbException e)
         {
+            Console.Error.WriteLine($"failed to execute: {e.Message}");
+            Console.Error.WriteLine($"failed command: {executing_command}");
             sqlSuccess = false;
         }
         return sqlSuccess;
@@ -77,7 +81,7 @@ class FileHandler {
             string[] pendingFiles = Directory.GetFiles(pendingDir);
             if (pendingFiles.Length == 0)
             {
-                Console.WriteLine($"No files match in {pendingDir}");
+                Console.Error.WriteLine($"No files match in {pendingDir}");
                 Environment.Exit(1);
             }
             return pendingFiles;
@@ -85,7 +89,7 @@ class FileHandler {
         }
         catch
         {
-            Console.WriteLine("pending Dir access failed");
+            Console.Error.WriteLine("pending Dir access failed");
             Environment.Exit(1);
             return []; // imagine your type system can't detect unreachable statements
         }
@@ -155,9 +159,9 @@ class FileHandler {
         using (StreamReader reader = new StreamReader(originalPath)) {
             reader.ReadLine(); // discard first line
             using StreamWriter writer = new StreamWriter(outputPath);
-            writer.WriteLine(firstLine);
+            //writer.WriteLine(firstLine);
             while (reader.ReadLine() is { } line) {
-                writer.WriteLine(line);
+                writer.WriteLine(firstLine + line);
             }
        }
 
@@ -176,60 +180,69 @@ class ProcessEzpaarse
     /// <param name="filepath">full path of the file to be uploaded to snowflake</param>
     /// <returns></returns>
     private static string[] GetCommands(string basename, string filepath) {
-        string deleteExisting1 = $"DELETE FROM EZPAARSE_RESULT_DEPTS WHERE \"recordid\" IN (SELECT \"recordid\" FROM EZPAARSE_RESULTS WHERE \"loadid\" = '{basename}')";
-        string deleteExisting2 = $"DELETE FROM EZPAARSE_RESULTS WHERE \"loadid\" = '{basename}';";
+        string deleteExisting1 = $"DELETE FROM EZPAARSE_RESULT_DEPTS WHERE recordid IN (SELECT recordid FROM EZPAARSE_RESULTS WHERE loadid = \'{basename}\')";
+        string deleteExisting2 = $"DELETE FROM EZPAARSE_RESULTS WHERE loadid = \'{basename}\';";
         string ezpaarseFormat = """
-            CREATE TEMP FILE FORMAT 'ezpaarse_csv' 
+            CREATE TEMP FILE FORMAT ezpaarse_csv
                 TYPE = CSV 
-                RECORD_DELIMITER = ';' 
-                FIELD_OPTIONALLY_ENCLOSED_BY = '\"' 
-                TIMESTAMP_FORMAT = YYYY-MM-DD"T"HH24:MI:SS+TZH:TZM 
+                FIELD_DELIMITER = ';' 
+                FIELD_OPTIONALLY_ENCLOSED_BY = '"' 
+                TIMESTAMP_FORMAT = 'YYYY-MM-DD"T"HH24:MI:SS+TZH:TZM' 
                 DATE_FORMAT = 'YYYY-MM-DD'
         """;
-        string stageFile = $"PUT file://{filepath} @~/ezpaarse_staged"; // upload file to snowflake server home of user account
+        string stageFile = $"PUT file://{filepath} @%EZPAARSE_RESULTS OVERWRITE=TRUE"; // upload file to snowflake server home of user account
         // record id is an autoincrement field in oracle, so using uuid as a number.
-        string insertContent = $"""
-                COPY INTO EZPAARSE_RESULTS FROM 
+        // explicitly rewriting column names such that recordid can be implicitly added and user_hash set to null
+        string insertContent = """
+                COPY INTO EZPAARSE_RESULTS (
+                loadid, datetime, date, login, platform, platform_name,
+                publisher_name, rtype, mime, print_identifier, online_identifier,
+                title_id, doi, publication_title, publication_date, unitid, domain,
+                on_campus, log_id, ezpaarse_version, ezpaarse_date,
+                middlewares_version, middlewares_date, platforms_version,
+                platforms_date, middlewares, title, type, subject, geoip_country,
+                geoip_latitude, geoip_longitude, host, ezproxy_session, url,
+                status, size
+                ) FROM 
                 (SELECT 
-                    --HASH(UUID_STRING()) AS "recordid",
-                    $1::CHAR(128) AS "loadid",
-                    TO_CHAR ($2::TIMESTAMP_TZ) AS "datetime",
-                    TO_CHAR($3::DATE) AS "date",
-                    RTRIM(REGEXP_REPLACE($4, "@pitt.edu", ""))::CHAR(17) AS "login",
-                    $5::CHAR(64) AS "platform",
-                    $6::CHAR(128) AS "platform_name",
-                    $7::CHAR(128) AS "publisher_name",
-                    $8::CHAR(24) AS "rtype",
-                    $9::CHAR(16) AS "mime",
-                    $10::CHAR(32) AS "print_identifier",
-                    $11::CHAR(32) AS "online_identifier",
-                    $12::CHAR(256) AS "title_id",
-                    $13::CHAR(256) AS "doi",
-                    SUBSTR($14, 1, 256)::CHAR(8192) AS "publication_title",
-                    $15::CHAR(10) AS "publication_date",
-                    SUBSTR($16, 1, 1024)::CHAR(8192) AS "unitid",
-                    $17::CHAR(128) AS "domain",
-                    $18::CHAR(1) AS "on_campus",
-                    $19::CHAR(64) AS "log_id",
-                    $20::CHAR(64) AS "ezpaarse_version",
-                    TO_CHAR($21::DATE) AS "ezpaarse_date",
-                    $22::CHAR(64) AS "middlewares_version",
-                    TO_CHAR($23::DATE) AS "middlewares_date",
-                    $24::CHAR(64) AS "platforms_version",
-                    TO_CHAR($25::DATE) AS "platforms_date",
-                    $26::CHAR(256) AS "middlewares",
-                    SUBSTR($27, 1, 1024)::CHAR(1024) AS "title",
-                    $28::CHAR(32) AS "type",
-                    $29::CHAR(512) AS "subject",
-                    $30::CHAR(2) AS "geoip_country",
-                    $31::CHAR AS "geoip_latitude",
-                    $32::CHAR AS "geoip_longitude",
-                    $33::CHAR(15) AS "host",
-                    $34::CHAR(15) AS "ezproxy_session",
-                    SUBSTR($35, 1, 1024) AS "url",
-                    $36::CHAR AS "status",
-                    $37::CHAR AS "size"
-                    FROM @~/ezpaarse_staged/{basename} (FILE_FORMAT => 'ezpaarse_csv'))
+                    $1::CHAR(128) AS loadid,
+                    $2::TIMESTAMP_TZ AS datetime,
+                    $3::DATE AS date,
+                    RTRIM(REGEXP_REPLACE($4, '@pitt\\.edu', ''))::CHAR(17) AS login,
+                    $5::CHAR(64) AS platform,
+                    $6::CHAR(128) AS platform_name,
+                    $7::CHAR(128) AS publisher_name,
+                    $8::CHAR(24) AS rtype,
+                    $9::CHAR(16) AS mime,
+                    $10::CHAR(32) AS print_identifier,
+                    $11::CHAR(32) AS online_identifier,
+                    $12::CHAR(256) AS title_id,
+                    $13::CHAR(256) AS doi,
+                    SUBSTR($14, 1, 256)::CHAR(8192) AS publication_title,
+                    $15::DATE AS publication_date,
+                    SUBSTR($16, 1, 1024)::CHAR(8192) AS unitid,
+                    $17::CHAR(128) AS domain,
+                    TO_BOOLEAN($18::CHAR(1)) AS on_campus,
+                    $19::CHAR(64) AS log_id,
+                    $20::CHAR(64) AS ezpaarse_version,
+                    $21::DATE AS ezpaarse_date,
+                    $22::CHAR(64) AS middlewares_version,
+                    $23::DATE AS middlewares_date,
+                    $24::CHAR(64) AS platforms_version,
+                    $25::DATE AS platforms_date,
+                    $26::CHAR(256) AS middlewares,
+                    SUBSTR($27, 1, 1024)::CHAR(1024) AS title,
+                    $28::CHAR(32) AS type,
+                    $29::CHAR(512) AS subject,
+                    $30::CHAR(2) AS geoip_country,
+                    $31::NUMBER(7,4) AS geoip_latitude,
+                    $32::NUMBER(7,4) AS geoip_longitude,
+                    $33::CHAR(15) AS host,
+                    $34::CHAR(15) AS ezproxy_session,
+                    SUBSTR($35, 1, 1024) AS url,
+                    $36::NUMBER(3) AS status,
+                    $37::NUMBER(10) AS size
+                    FROM @%EZPAARSE_RESULTS (FILE_FORMAT => 'ezpaarse_csv'))
                 """;
         return  [ezpaarseFormat, deleteExisting1, deleteExisting2, stageFile, insertContent];
     }
@@ -246,21 +259,22 @@ class ProcessEzpaarse
         string[] pendingFiles = fileHandler.GetPendingFilesOrFail();
         foreach (string pendingFullPath in pendingFiles)
         {
-            string pendingBasePath = Path.GetFileName(pendingFullPath);
-            if (!fileHandler.CheckPendingShouldBeProcessed(pendingBasePath))
+            string pendingFileName = Path.GetFileName(pendingFullPath);
+            string loadid = Path.GetFileNameWithoutExtension(pendingFullPath);
+            if (!fileHandler.CheckPendingShouldBeProcessed(pendingFileName))
             {
                 continue;
             }
-            string workingPath = fileHandler.MoveToWorking(pendingBasePath);
-            FileHandler.ReplaceFirstLine(workingPath, workingPath + ".data", basePath + ";");
-            string[] commands = ProcessEzpaarse.GetCommands(basePath, workingPath + ".data");
+            string workingPath = fileHandler.MoveToWorking(pendingFileName);
+            FileHandler.ReplaceFirstLine(workingPath, workingPath + ".data", loadid + ";");
+            string[] commands = ProcessEzpaarse.GetCommands(loadid, workingPath + ".data");
             SnowflakeWrapper wrapper = new SnowflakeWrapper(Environment.GetEnvironmentVariable("SNOWFLAKE_AUTH_STRING") ?? "");
             bool success = wrapper.ExecuteCommandList(commands);
 
             if (success)
             {
-                fileHandler.MoveToDone(basePath);
-                fileHandler.RemoveTempFiles(basePath);
+                fileHandler.MoveToDone(pendingFileName);
+                fileHandler.RemoveTempFiles(pendingFileName);
             }
             else
             {
