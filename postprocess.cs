@@ -1,5 +1,6 @@
 using System.Data;
 using System.Text;
+using System.Security.Cryptography;
 using Snowflake.Data.Client;
 
 public class PostProcess {
@@ -10,22 +11,26 @@ public class PostProcess {
                         Console.WriteLine("Expected environment variable USER_HASH_SALT not found. This is used for creating user hashes in db. Exiting...");
                         Environment.Exit(0);
                 }
-                string salt_source = salt_source_env.Value; // cast from nullable to string
+                string salt_source = salt_source_env; // cast from nullable to string
                 
-                // validate the salt_source somehow since inserting into a complex query
+                // validate the salt_source somehow since inserting into a complex query, maybe hash it?
+                
+                byte[] salt_bytes = Encoding.UTF8.GetBytes(salt_source_env);
 
+                // One-liner for modern .NET (Returns uppercase hex digest)
+                string salt_digest = Convert.ToHexString(SHA256.HashData(salt_bytes)); 
                 // translated sql statement from postprocess.sql
                 string exeString = $"""
                 BEGIN
 
                 INSERT INTO EZPAARSE_RESULT_DEPTS
                 SELECT                  -- Associate rc_cd and department_cd for students in EZPAARSE_RESULTS
-                        ez."recordid",
+                        ez.recordid,
                         stu.rc_cd,
                         stu.department_cd,
                         'Student'
                 FROM
-                        R60.EZPAARSE_RESULTS ez
+                        EZPAARSE_RESULTS ez
                         INNER JOIN
                         (
                                 SELECT DISTINCT
@@ -46,22 +51,22 @@ public class PostProcess {
                                         dp.is_current = TRUE
                                         AND cal.st_monthly_retain_flg = TRUE
                                         AND cal.full_dt > '2019-01-01'::DATE
-                        ) stu ON ez."login" = stu.username AND (ez."datetime" BETWEEN stu.start_dt AND stu.end_dt)
+                        ) stu ON ez.login = stu.username AND (ez.datetime BETWEEN stu.start_dt AND stu.end_dt)
                 WHERE
-                        ez."recordid" NOT IN (SELECT "recordid" FROM R60.EZPAARSE_RESULT_DEPTS)
-                        AND ez."datetime" < DATE_TRUNC('MONTH', CURRENT_TIMESTAMP)
+                        ez.recordid NOT IN (SELECT recordid FROM EZPAARSE_RESULT_DEPTS)
+                        AND ez.datetime < DATE_TRUNC('MONTH', CURRENT_TIMESTAMP)
                 UNION
                 SELECT -- Associate department_cd and rc_cd to ezpaarze_results using login name, corresponding to period/month of ezpaarse_results datetime 
-                        ez."recordid",
+                        ez.recordid,
                         em.rc_cd,
                         em.department_cd,
                         em.job_type
                 FROM
-                        R60.EZPAARSE_RESULTS ez
+                        EZPAARSE_RESULTS ez
                         INNER JOIN
                         (
                                 SELECT DISTINCT
-                                        em.username,
+                                        emp.username,
                                         pd.period_date_beg AS date_begin,
                                         pd.period_date_end AS date_end,
                                         emp.responsibility_center_cd AS rc_cd,
@@ -70,35 +75,34 @@ public class PostProcess {
                                 FROM
                                         hr.employee emp
                                         INNER JOIN PITT_MD.PERIOD pd ON emp.period_name = pd.period_name
-                                        
+                                        INNER JOIN PITT_MD.department dep ON emp.department_cd = dep.department_cd
                                 WHERE
-                                        dep.current_flg = TRUE
-                                        AND cal.py_month_end_flg = TRUE
-                                        AND jb.job_type != 'Student'
-                                        AND cal.full_dt > '2019-01-01'
-                        ) em ON ez."login" = em.username AND (ez."datetime"::DATE BETWEEN date_begin AND date_end)
+                                        dep.is_current = TRUE
+                                        AND emp.job_type != 'Student'
+                                        AND date_begin > '2019-01-01'
+                        ) em ON ez.login = em.username AND (ez.datetime::DATE BETWEEN date_begin AND date_end)
                 WHERE
-                        ez."recordid" NOT IN (SELECT "recordid" FROM R60.EZPAARSE_RESULT_DEPTS)
-                        AND ez."datetime" < DATE_TRUNC('MONTH', CURRENT_TIMESTAMP)
+                        ez.recordid NOT IN (SELECT recordid FROM EZPAARSE_RESULT_DEPTS)
+                        AND ez.datetime < DATE_TRUNC('MONTH', CURRENT_TIMESTAMP)
                 UNION
                 SELECT 
-                        ez."recordid",
+                        ez.recordid,
                         sp.SPONSORSHIP_RESPONSIBILITY_CENTER_CD,
                         '00000',
                         'Sponsored Account'
                 FROM
                         EZPAARSE_RESULTS ez
-                        INNER JOIN PITT_MD.SPONSORED_ACCOUNTS sp ON ez."login" = sp.SPONSORED_USERNAME
+                        INNER JOIN PITT_MD.SPONSORED_ACCOUNTS sp ON ez.login = sp.SPONSORED_USERNAME
                 WHERE
-                        ez."recordid" NOT IN (SELECT "recordid" FROM R60.EZPAARSE_RESULT_DEPTS)
-                        AND ez."datetime" < DATE_TRUNC('MONTH', CURRENT_TIMESTAMP)
+                        ez.recordid NOT IN (SELECT recordid FROM R60.EZPAARSE_RESULT_DEPTS)
+                        AND ez.datetime < DATE_TRUNC('MONTH', CURRENT_TIMESTAMP)
                 ;
 
                 UPDATE EZPAARSE_RESULTS
-                SET "user_hash" = (
-                        SHA2({salt_source} || EZPAARSE_RESULTS."login")
+                SET user_hash = (
+                        SHA2('{salt_digest}' || EZPAARSE_RESULTS.login)
                 )
-                WHERE "user_hash" IS NULL;
+                WHERE user_hash IS NULL;
 
                 COMMIT;
 
