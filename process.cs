@@ -23,7 +23,7 @@ class SnowflakeWrapper
     /// </summary>
     /// <param name="commands"> List of sql commands </param>
     /// <returns> If error was encountered during command execution </returns>
-    public bool ExecuteCommandList(string[] commands)
+    public bool ExecuteCommandList(string[] commands, string[] failure_recovery_commands)
     {
         bool sqlSuccess = true;
         string executing_command = "";
@@ -35,13 +35,26 @@ class SnowflakeWrapper
                 using (IDbCommand cmd = conn.CreateCommand())
                 {
                     //string[] commands = [ezpaarseFormat, deleteExisting1, deleteExisting2, stageFile, insertContent];
-                    foreach (string cmdStr in commands)
+                    try {
+                        foreach (string cmdStr in commands)
+                        {
+                            cmd.CommandText = cmdStr;
+                            executing_command = cmdStr;
+                            cmd.ExecuteNonQuery();
+                        }
+                    } catch (SnowflakeDbException e)
                     {
-                        cmd.CommandText = cmdStr;
-                        executing_command = cmdStr;
-                        cmd.ExecuteNonQuery();
-                    }
+                        foreach (string recovery_command in failure_recovery_commands)
+                        {
+                            cmd.CommandText = recovery_command;
+                            cmd.ExecuteNonQuery();
+                        }
+                        Console.Error.WriteLine($"failed to execute: {e.Message}");
+                        Console.Error.WriteLine($"failed command: {executing_command}");
+                        sqlSuccess = false;
+                    } finally {
                     conn.Close();
+                    }
                 }
 
             }
@@ -131,6 +144,12 @@ class FileHandler {
         File.Move(workingPath, donePath);
     }
 
+     public void MoveToPending(string name)
+    {
+        string pendingPath = Path.Join(baseDir, "pending", name);
+        string workingPath = Path.Join(baseDir, "working", name);
+        File.Move(workingPath, pendingPath);
+    }
     /// <summary>
     /// remove files created during processing associated with the file being processed
     /// to be done after file has been processed
@@ -183,11 +202,13 @@ class ProcessEzpaarse
         string deleteExisting1 = $"DELETE FROM EZPAARSE_RESULT_DEPTS WHERE recordid IN (SELECT recordid FROM EZPAARSE_RESULTS WHERE loadid = \'{basename}\')";
         string deleteExisting2 = $"DELETE FROM EZPAARSE_RESULTS WHERE loadid = \'{basename}\';";
         string ezpaarseFormat = """
-            CREATE TEMP FILE FORMAT ezpaarse_csv
+            CREATE OR REPLACE TEMP FILE FORMAT ezpaarse_csv
                 TYPE = CSV 
                 FIELD_DELIMITER = ';' 
                 FIELD_OPTIONALLY_ENCLOSED_BY = '"' 
                 TIMESTAMP_FORMAT = 'YYYY-MM-DD"T"HH24:MI:SS+TZH:TZM' 
+                ESCAPE=NONE
+                ESCAPE_UNENCLOSED_FIELD=NONE
                 DATE_FORMAT = 'YYYY-MM-DD'
         """;
         string stageFile = $"PUT file://{filepath} @%EZPAARSE_RESULTS OVERWRITE=TRUE"; // upload file to snowflake server home of user account
@@ -219,7 +240,7 @@ class ProcessEzpaarse
                     $12::CHAR(256) AS title_id,
                     $13::CHAR(256) AS doi,
                     SUBSTR($14, 1, 256)::CHAR(8192) AS publication_title,
-                    $15::DATE AS publication_date,
+                    $15::CHAR(10) AS publication_date,
                     SUBSTR($16, 1, 1024)::CHAR(8192) AS unitid,
                     $17::CHAR(128) AS domain,
                     TO_BOOLEAN($18::CHAR(1)) AS on_campus,
@@ -242,11 +263,17 @@ class ProcessEzpaarse
                     SUBSTR($35, 1, 1024) AS url,
                     $36::NUMBER(3) AS status,
                     $37::NUMBER(10) AS size
-                    FROM @%EZPAARSE_RESULTS (FILE_FORMAT => 'ezpaarse_csv'))
+                    FROM @%EZPAARSE_RESULTS (FILE_FORMAT => 'ezpaarse_csv')) 
                 """;
-        return  [ezpaarseFormat, deleteExisting1, deleteExisting2, stageFile, insertContent];
+        string remove_uploaded = $"REMOVE @%EZPAARSE_RESULTS PATTERN={basename}.data.gz";
+        return  [ezpaarseFormat, deleteExisting1, deleteExisting2, stageFile, insertContent, remove_uploaded];
     }
 
+    public static string[] GetRecoveryCommands(string basename, string filepath)
+    {
+        string remove_uploaded = $"REMOVE @%EZPAARSE_RESULTS PATTERN={basename}.data.gz";
+        return [remove_uploaded];
+    }
     /// <summary>
     /// Process each file in /pending/ if possible i.e.
     /// upload content of each /pending/ file as a csv into the snowflake
@@ -254,22 +281,28 @@ class ProcessEzpaarse
     /// </summary>
     public static void Main()
     {
-        string basePath = Directory.GetCurrentDirectory();
+        string? basePath = Environment.GetEnvironmentVariable("BASE_DIR");
+        if (basePath == null) { 
+            Console.Error.WriteLine("BASE_DIR environment variable not provided, using current directory");
+            basePath = Directory.GetCurrentDirectory();
+        }
         FileHandler fileHandler =  new FileHandler(basePath);
         string[] pendingFiles = fileHandler.GetPendingFilesOrFail();
         foreach (string pendingFullPath in pendingFiles)
         {
             string pendingFileName = Path.GetFileName(pendingFullPath);
-            string loadid = Path.GetFileNameWithoutExtension(pendingFullPath);
+            string loadid = Path.GetFileName(pendingFullPath);
             if (!fileHandler.CheckPendingShouldBeProcessed(pendingFileName))
             {
+                Console.Error.WriteLine($"{pendingFileName} already exists in pending or done, skipping...");
                 continue;
             }
             string workingPath = fileHandler.MoveToWorking(pendingFileName);
             FileHandler.ReplaceFirstLine(workingPath, workingPath + ".data", loadid + ";");
             string[] commands = ProcessEzpaarse.GetCommands(loadid, workingPath + ".data");
+            string[] recover_commands = ProcessEzpaarse.GetRecoveryCommands(loadid, workingPath+".data");
             SnowflakeWrapper wrapper = new SnowflakeWrapper(Environment.GetEnvironmentVariable("SNOWFLAKE_AUTH_STRING") ?? "");
-            bool success = wrapper.ExecuteCommandList(commands);
+            bool success = wrapper.ExecuteCommandList(commands, recover_commands);
 
             if (success)
             {
@@ -278,6 +311,8 @@ class ProcessEzpaarse
             }
             else
             {
+                fileHandler.MoveToPending(pendingFileName);
+                fileHandler.RemoveTempFiles(pendingFileName);
                 Console.WriteLine("failed to execute sql");
             }
 
