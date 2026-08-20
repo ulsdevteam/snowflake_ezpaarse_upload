@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Data;
 using System.Data.Common;
@@ -94,8 +94,8 @@ class FileHandler {
             string[] pendingFiles = Directory.GetFiles(pendingDir);
             if (pendingFiles.Length == 0)
             {
-                Console.Error.WriteLine($"No files match in {pendingDir}");
-                Environment.Exit(1);
+                Console.WriteLine($"No files match in {pendingDir}");
+                Environment.Exit(0); // fail gracefully if no files found
             }
             return pendingFiles;
 
@@ -283,7 +283,7 @@ class ProcessEzpaarse
     {
         string? basePath = Environment.GetEnvironmentVariable("BASE_DIR");
         if (basePath == null) { 
-            Console.Error.WriteLine("BASE_DIR environment variable not provided, using current directory");
+            Console.WriteLine("BASE_DIR environment variable not provided, using current directory");
             basePath = Directory.GetCurrentDirectory();
         }
         FileHandler fileHandler =  new FileHandler(basePath);
@@ -294,7 +294,7 @@ class ProcessEzpaarse
             string loadid = Path.GetFileName(pendingFullPath);
             if (!fileHandler.CheckPendingShouldBeProcessed(pendingFileName))
             {
-                Console.Error.WriteLine($"{pendingFileName} already exists in pending or done, skipping...");
+                Console.WriteLine($"{pendingFileName} already exists in pending or done, skipping...");
                 continue;
             }
             string workingPath = fileHandler.MoveToWorking(pendingFileName);
