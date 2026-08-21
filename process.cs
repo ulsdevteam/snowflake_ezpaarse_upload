@@ -316,19 +316,19 @@ class FileHandler {
     /// <summary>
     /// Translation of following sed statement 
     /// <c>sed 1d < $EZPFILESDIR/working/$fname | sed "s/^/$fname;/" >> $EZPFILESDIR/working/$fname.data </c>
-    /// i.e. replace first line of a file and store it in a different filename
+    /// i.e. Truncate first line (for eg. csv header) and insert $fname to start of each line 
     /// </summary>
     /// <param name="originalPath"> input file </param>
     /// <param name="outputPath"> output file </param>
-    /// <param name="firstLine"> new first line </param>
-    public static void ReplaceFirstLine(string originalPath, string outputPath, string firstLine)
+    /// <param name="firstColumn"> new first line </param>
+    public static void TruncateFirstLineAndInsertColumn(string originalPath, string outputPath, string firstColumn)
     {
         using (StreamReader reader = new StreamReader(originalPath)) {
             reader.ReadLine(); // discard first line
             using StreamWriter writer = new StreamWriter(outputPath);
             //writer.WriteLine(firstLine);
             while (reader.ReadLine() is { } line) {
-                writer.WriteLine(firstLine + line);
+                writer.WriteLine(firstColumn + line);
             }
        }
 
@@ -652,7 +652,8 @@ class ProcessEzpaarse
                 continue;
             }
             string workingPath = fileHandler.MoveToWorking(pendingFileName);
-            FileHandler.ReplaceFirstLine(workingPath, workingPath + ".data", loadid + ";"); 
+            // preprocess csv
+            FileHandler.TruncateFirstLineAndInsertColumn(workingPath, workingPath + ".data", loadid + ";"); 
             ICommandList commands = new CommandList(loadid, workingPath + ".data");
             // string[] commands = ProcessEzpaarse.GetCommands(loadid, workingPath + ".data");
             // string[] recover_commands = ProcessEzpaarse.GetRecoveryCommands(loadid, workingPath+".data");
