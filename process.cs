@@ -4,6 +4,7 @@ using System.Data;
 using System.Data.Common;
 using Snowflake.Data.Client;
 using System.Runtime.CompilerServices;
+using Org.BouncyCastle.Crypto.Modes;
 
 
 
@@ -80,7 +81,9 @@ class SnowflakeWrapper
     public static IDbCommand PrepareCommand<T>(IDbConnection conn, string query, T parameter_tuple)
     {
         IDbCommand cmd = conn.CreateCommand();
-        cmd.Parameters.Clear();
+        //cmd.Parameters.Clear(); 
+        // (double x, int y) = (5, 7)
+        cmd.CommandText = query;
         ITuple generic_tuple;
         if (parameter_tuple is not ITuple)
         {
@@ -90,10 +93,10 @@ class SnowflakeWrapper
             generic_tuple = (ITuple)parameter_tuple;
         }
         Type[] types = generic_tuple.GetType().GetGenericArguments();
-        for (int i = 1; i <= generic_tuple.Length; i++)
+        for (int i = 0; i < generic_tuple.Length; i++)
         {
             var param = cmd.CreateParameter();
-            param.ParameterName = i.ToString();
+            param.ParameterName = 'p' + (i).ToString();
             if (to_db_type(types[i]) == null)
             {
                 throw new ArgumentException($"{types[i]} does not have a mapping to corresponding DbType for parameters");
@@ -159,11 +162,12 @@ class SnowflakeWrapper
             Console.Error.WriteLine($"failed command: {executing_command}");
             sqlSuccess = false;
         }
-        catch (Exception exc)
-        {
-            Console.Error.WriteLine("Encountered Generic Exception: ");
-            Console.Error.WriteLine(exc.Message);
-        }
+        //catch (Exception exc)
+        //{
+        //    Console.Error.WriteLine("Encountered Generic Exception: ");
+        //    Console.Error.WriteLine(exc.Message);
+            
+        //}
          return sqlSuccess;
     }
     /// <summary>
@@ -430,12 +434,12 @@ class CommandList : ICommandList
             throw new ArgumentException("Connection not initialized");
         }
 
-        string deleteExisting1 = $"DELETE FROM EZPAARSE_RESULT_DEPTS WHERE recordid IN (SELECT recordid FROM EZPAARSE_RESULTS WHERE loadid = \'?\')";
+        string deleteExisting1 = $"DELETE FROM EZPAARSE_RESULT_DEPTS WHERE recordid IN (SELECT recordid FROM EZPAARSE_RESULTS WHERE loadid = :p0)";
         IDbCommand cmd = SnowflakeWrapper.PrepareCommand<string>(this.conn, deleteExisting1, this.basename);
 
         yield return cmd;
 
-        string deleteExisting2 = $"DELETE FROM EZPAARSE_RESULTS WHERE loadid = \'?\';";
+        string deleteExisting2 = $"DELETE FROM EZPAARSE_RESULTS WHERE loadid = :p0;";
         cmd = SnowflakeWrapper.PrepareCommand<string>(this.conn, deleteExisting2, this.basename);
 
     
@@ -454,9 +458,9 @@ class CommandList : ICommandList
         cmd = SnowflakeWrapper.PrepareCommand(this.conn, ezpaarseFormat);
         yield return cmd;
         
-
-        string stageFile = $"PUT file://? @%EZPAARSE_RESULTS OVERWRITE=TRUE"; // upload file to snowflake server home of user account
-        cmd = SnowflakeWrapper.PrepareCommand<string>(this.conn, stageFile, this.filename);
+        // PUT does not support substitution
+        string stageFile = $"PUT file://{this.filename} @%EZPAARSE_RESULTS OVERWRITE=TRUE"; // upload file to snowflake server home of user account
+        cmd = SnowflakeWrapper.PrepareCommand(this.conn, stageFile);
         yield return cmd;  
         
         // record id is an autoincrement field in oracle, so using uuid as a number.
@@ -515,8 +519,9 @@ class CommandList : ICommandList
         cmd = SnowflakeWrapper.PrepareCommand(this.conn, insertContent);
         yield return cmd;
 
-        string remove_uploaded = $"REMOVE @%EZPAARSE_RESULTS PATTERN=?.data.gz";
-        cmd = SnowflakeWrapper.PrepareCommand<string>(this.conn, remove_uploaded, this.basename);
+        // Remove does not support parameters
+        string remove_uploaded = $"REMOVE @%EZPAARSE_RESULTS PATTERN={this.basename}.data.gz";
+        cmd = SnowflakeWrapper.PrepareCommand(this.conn, remove_uploaded);
         yield return cmd;
         yield break;
     }
