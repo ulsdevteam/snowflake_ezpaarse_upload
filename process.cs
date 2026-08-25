@@ -4,7 +4,7 @@ using System.Data;
 using System.Data.Common;
 using Snowflake.Data.Client;
 using System.Runtime.CompilerServices;
-using Org.BouncyCastle.Crypto.Modes;
+
 
 
 
@@ -15,20 +15,20 @@ class SnowflakeWrapper
 {
     string authString = "";
 
-    ///<param name="auth_string"> is connection string used for initiating snowflake connection</param>
-    public SnowflakeWrapper(string auth_string)
+    ///<param name="authString"> is connection string used for initiating snowflake connection</param>
+    public SnowflakeWrapper(string authString)
     {   
-        this.authString = auth_string;
+        this.authString = authString;
     }
 
 /// <summary>
 /// Convert a C# native type to corresponding DbType used by snowflake connector
 /// </summary>
-/// <param name="t"> Input type </param>
-/// <returns> DbType equivalent of Input `t`</returns>
- public static DbType? to_db_type(Type t)
+/// <param name="T"> Input type </param>
+/// <returns> DbType equivalent of Input `T`</returns>
+ public static DbType? toDbType(Type T)
     {
-        switch (Type.GetTypeCode(t))
+        switch (Type.GetTypeCode(T))
         {
             case TypeCode.Int32:
                 return DbType.Int32;
@@ -72,39 +72,37 @@ class SnowflakeWrapper
     /// For example: For a single parameter, 7
     /// > IDbCommand cmd = PrepareCommand<int>(conn, qry, 7);
     /// </summary>
-    /// <typeparam name="T"> a type, or a tuple of types, that can be mapped via to_db_type</typeparam>
+    /// <typeparam name="T"> a type, or a tuple of types, that can be mapped via toDbType</typeparam>
     /// <param name="conn"> Connection object that allows for command creation</param>
     /// <param name="query"> Query template string, with ? substituted for parameter values (named parameters not supported)</param>
-    /// <param name="parameter_tuple"></param>
+    /// <param name="parameterTuple"></param>
     /// <returns></returns>
     /// <exception cref="ArgumentException"></exception>
-    public static IDbCommand PrepareCommand<T>(IDbConnection conn, string query, T parameter_tuple)
+    public static IDbCommand PrepareCommand<T>(IDbConnection conn, string query, T parameterTuple)
     {
         IDbCommand cmd = conn.CreateCommand();
-        //cmd.Parameters.Clear(); 
-        // (double x, int y) = (5, 7)
         cmd.CommandText = query;
-        ITuple generic_tuple;
-        if (parameter_tuple is not ITuple)
+        ITuple genericTuple;
+        if (parameterTuple is not ITuple)
         {
-            generic_tuple = ValueTuple.Create<T>(parameter_tuple);
+            genericTuple = ValueTuple.Create<T>(parameterTuple);
         }
         else {
-            generic_tuple = (ITuple)parameter_tuple;
+            genericTuple = (ITuple)parameterTuple;
         }
-        Type[] types = generic_tuple.GetType().GetGenericArguments();
-        for (int i = 0; i < generic_tuple.Length; i++)
+        Type[] types = genericTuple.GetType().GetGenericArguments();
+        for (int i = 0; i < genericTuple.Length; i++)
         {
             var param = cmd.CreateParameter();
             param.ParameterName = 'p' + (i).ToString();
-            if (to_db_type(types[i]) == null)
+            if (toDbType(types[i]) is null)
             {
                 throw new ArgumentException($"{types[i]} does not have a mapping to corresponding DbType for parameters");
             }
             
-            param.DbType = to_db_type(types[i]).Value;
+            param.DbType = toDbType(types[i]).Value;
             
-            param.Value = generic_tuple[i];
+            param.Value = genericTuple[i];
             cmd.Parameters.Add(param);
         }
         return cmd;
@@ -122,7 +120,7 @@ class SnowflakeWrapper
     public bool ExecuteCommandList(ICommandList commands)
     {
         bool sqlSuccess = true;
-        string executing_command = "";
+        string executingCommand = "";
         try
         {
             using (IDbConnection conn = new SnowflakeDbConnection())
@@ -134,18 +132,18 @@ class SnowflakeWrapper
                 {
                     try 
                     {
-                        executing_command = cmd.CommandText;
+                        executingCommand = cmd.CommandText;
                         cmd.ExecuteNonQuery();
                     }
                     catch (SnowflakeDbException e)
                     {
-                        foreach (IDbCommand recovery_cmd in commands.GetRecoveryCommands())
+                        foreach (IDbCommand recoveryCmd in commands.GetRecoveryCommands())
                         {
-                            recovery_cmd.ExecuteNonQuery();
-                            recovery_cmd.Dispose();
+                            recoveryCmd.ExecuteNonQuery();
+                            recoveryCmd.Dispose();
                         }
                         Console.Error.WriteLine($"failed to execute: {e.Message}");
-                        Console.Error.WriteLine($"failed command: {executing_command}");
+                        Console.Error.WriteLine($"failed command: {executingCommand}");
                         sqlSuccess = false;
                     }
                     finally {
@@ -159,15 +157,16 @@ class SnowflakeWrapper
         catch (SnowflakeDbException e)
         {
             Console.Error.WriteLine($"failed to execute: {e.Message}");
-            Console.Error.WriteLine($"failed command: {executing_command}");
+            Console.Error.WriteLine($"failed command: {executingCommand}");
             sqlSuccess = false;
         }
-        //catch (Exception exc)
-        //{
-        //    Console.Error.WriteLine("Encountered Generic Exception: ");
-        //    Console.Error.WriteLine(exc.Message);
+        catch (Exception exc)
+        {
+            Console.Error.WriteLine("Encountered Generic Exception: ");
+            Console.Error.WriteLine(exc.Message);
+            sqlSuccess= false;
             
-        //}
+        }
          return sqlSuccess;
     }
     /// <summary>
@@ -175,10 +174,10 @@ class SnowflakeWrapper
     /// </summary>
     /// <param name="commands"> List of sql commands </param>
     /// <returns> If error was encountered during command execution </returns>
-    public bool ExecuteCommandArray(string[] commands, string[] failure_recovery_commands)
+    public bool ExecuteCommandArray(string[] commands, string[] failureRecoveryCommands)
     {
         bool sqlSuccess = true;
-        string executing_command = "";
+        string executingCommand = "";
         try {
             using (IDbConnection conn = new SnowflakeDbConnection())
             {
@@ -191,18 +190,18 @@ class SnowflakeWrapper
                         foreach (string cmdStr in commands)
                         {
                             cmd.CommandText = cmdStr;
-                            executing_command = cmdStr;
+                            executingCommand = cmdStr;
                             cmd.ExecuteNonQuery();
                         }
                     } catch (SnowflakeDbException e)
                     {
-                        foreach (string recovery_command in failure_recovery_commands)
+                        foreach (string recoveryCommand in failureRecoveryCommands)
                         {
-                            cmd.CommandText = recovery_command;
+                            cmd.CommandText = recoveryCommand;
                             cmd.ExecuteNonQuery();
                         }
                         Console.Error.WriteLine($"failed to execute: {e.Message}");
-                        Console.Error.WriteLine($"failed command: {executing_command}");
+                        Console.Error.WriteLine($"failed command: {executingCommand}");
                         sqlSuccess = false;
                     } finally {
                     conn.Close();
@@ -214,7 +213,7 @@ class SnowflakeWrapper
         catch (SnowflakeDbException e)
         {
             Console.Error.WriteLine($"failed to execute: {e.Message}");
-            Console.Error.WriteLine($"failed command: {executing_command}");
+            Console.Error.WriteLine($"failed command: {executingCommand}");
             sqlSuccess = false;
         }
         return sqlSuccess;
@@ -532,15 +531,14 @@ class CommandList : ICommandList
     /// <returns> iterator of commands to be executed if happy path fails</returns>
     /// <exception cref="ArgumentException"> safety check for this.conn. Should never be encountered in prod, since all code paths
     /// should initialize this.conn before trying to iterate through commands.</exception>
-
     public IEnumerable<IDbCommand> GetRecoveryCommands()
     {
         if (this.conn == null)
         {
             throw new ArgumentException("Connection not initialized");
         }
-        string remove_uploaded = $"REMOVE @%EZPAARSE_RESULTS PATTERN={basename}.data.gz";
-        IDbCommand cmd = SnowflakeWrapper.PrepareCommand(this.conn, remove_uploaded);
+        string removeUploaded = $"REMOVE @%EZPAARSE_RESULTS PATTERN={basename}.data.gz";
+        IDbCommand cmd = SnowflakeWrapper.PrepareCommand(this.conn, removeUploaded);
         yield return cmd;
         yield break;
     }
@@ -551,88 +549,7 @@ class CommandList : ICommandList
 /// </summary>
 class ProcessEzpaarse
 {
-    /// <summary>
-    /// List of sql statements, wrapped as a function to make inline substitution work
-    /// </summary>
-    /// <param name="basename">name of file being processed (also used as name of file in staged folder)</param>
-    /// <param name="filepath">full path of the file to be uploaded to snowflake</param>
-    /// <returns></returns>
-    private static string[] GetCommands(string basename, string filepath) {
-        string deleteExisting1 = $"DELETE FROM EZPAARSE_RESULT_DEPTS WHERE recordid IN (SELECT recordid FROM EZPAARSE_RESULTS WHERE loadid = \'{basename}\')";
-        string deleteExisting2 = $"DELETE FROM EZPAARSE_RESULTS WHERE loadid = \'{basename}\';";
-        string ezpaarseFormat = """
-            CREATE OR REPLACE TEMP FILE FORMAT ezpaarse_csv
-                TYPE = CSV 
-                FIELD_DELIMITER = ';' 
-                FIELD_OPTIONALLY_ENCLOSED_BY = '"' 
-                TIMESTAMP_FORMAT = 'YYYY-MM-DD"T"HH24:MI:SS+TZH:TZM' 
-                ESCAPE=NONE
-                ESCAPE_UNENCLOSED_FIELD=NONE
-                DATE_FORMAT = 'YYYY-MM-DD'
-        """;
-        string stageFile = $"PUT file://{filepath} @%EZPAARSE_RESULTS OVERWRITE=TRUE"; // upload file to snowflake server home of user account
-        // record id is an autoincrement field in oracle, so using uuid as a number.
-        // explicitly rewriting column names such that recordid can be implicitly added and user_hash set to null
-        string insertContent = """
-                COPY INTO EZPAARSE_RESULTS (
-                loadid, datetime, date, login, platform, platform_name,
-                publisher_name, rtype, mime, print_identifier, online_identifier,
-                title_id, doi, publication_title, publication_date, unitid, domain,
-                on_campus, log_id, ezpaarse_version, ezpaarse_date,
-                middlewares_version, middlewares_date, platforms_version,
-                platforms_date, middlewares, title, type, subject, geoip_country,
-                geoip_latitude, geoip_longitude, host, ezproxy_session, url,
-                status, size
-                ) FROM 
-                (SELECT 
-                    $1::CHAR(128) AS loadid,
-                    $2::TIMESTAMP_TZ AS datetime,
-                    $3::DATE AS date,
-                    RTRIM(REGEXP_REPLACE($4, '@pitt\\.edu', ''))::CHAR(17) AS login,
-                    $5::CHAR(64) AS platform,
-                    $6::CHAR(128) AS platform_name,
-                    $7::CHAR(128) AS publisher_name,
-                    $8::CHAR(24) AS rtype,
-                    $9::CHAR(16) AS mime,
-                    $10::CHAR(32) AS print_identifier,
-                    $11::CHAR(32) AS online_identifier,
-                    $12::CHAR(256) AS title_id,
-                    $13::CHAR(256) AS doi,
-                    SUBSTR($14, 1, 256)::CHAR(8192) AS publication_title,
-                    $15::CHAR(10) AS publication_date,
-                    SUBSTR($16, 1, 1024)::CHAR(8192) AS unitid,
-                    $17::CHAR(128) AS domain,
-                    TO_BOOLEAN($18::CHAR(1)) AS on_campus,
-                    $19::CHAR(64) AS log_id,
-                    $20::CHAR(64) AS ezpaarse_version,
-                    $21::DATE AS ezpaarse_date,
-                    $22::CHAR(64) AS middlewares_version,
-                    $23::DATE AS middlewares_date,
-                    $24::CHAR(64) AS platforms_version,
-                    $25::DATE AS platforms_date,
-                    $26::CHAR(256) AS middlewares,
-                    SUBSTR($27, 1, 1024)::CHAR(1024) AS title,
-                    $28::CHAR(32) AS type,
-                    $29::CHAR(512) AS subject,
-                    $30::CHAR(2) AS geoip_country,
-                    $31::NUMBER(7,4) AS geoip_latitude,
-                    $32::NUMBER(7,4) AS geoip_longitude,
-                    $33::CHAR(15) AS host,
-                    $34::CHAR(15) AS ezproxy_session,
-                    SUBSTR($35, 1, 1024) AS url,
-                    $36::NUMBER(3) AS status,
-                    $37::NUMBER(10) AS size
-                    FROM @%EZPAARSE_RESULTS (FILE_FORMAT => 'ezpaarse_csv')) 
-                """;
-        string remove_uploaded = $"REMOVE @%EZPAARSE_RESULTS PATTERN={basename}.data.gz";
-        return  [ezpaarseFormat, deleteExisting1, deleteExisting2, stageFile, insertContent, remove_uploaded];
-    }
-
-    public static string[] GetRecoveryCommands(string basename, string filepath)
-    {
-        string remove_uploaded = $"REMOVE @%EZPAARSE_RESULTS PATTERN={basename}.data.gz";
-        return [remove_uploaded];
-    }
+  
     /// <summary>
     /// Process each file in /pending/ if possible i.e.
     /// upload content of each /pending/ file as a csv into the snowflake
@@ -660,8 +577,7 @@ class ProcessEzpaarse
             // preprocess csv
             FileHandler.TruncateFirstLineAndInsertColumn(workingPath, workingPath + ".data", loadid + ";"); 
             ICommandList commands = new CommandList(loadid, workingPath + ".data");
-            // string[] commands = ProcessEzpaarse.GetCommands(loadid, workingPath + ".data");
-            // string[] recover_commands = ProcessEzpaarse.GetRecoveryCommands(loadid, workingPath+".data");
+            
             SnowflakeWrapper wrapper = new SnowflakeWrapper(Environment.GetEnvironmentVariable("SNOWFLAKE_AUTH_STRING") ?? "");
             bool success = wrapper.ExecuteCommandList(commands);
 
@@ -672,9 +588,10 @@ class ProcessEzpaarse
             }
             else
             {
-                fileHandler.MoveToPending(pendingFileName);
+                //fileHandler.MoveToPending(pendingFileName);
                 fileHandler.RemoveTempFiles(pendingFileName);
-                Console.WriteLine("failed to execute sql");
+                Console.WriteLine($"failed to execute sql for {pendingFileName}");
+                Environment.Exit(1);
             }
 
 
