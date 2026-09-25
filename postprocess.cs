@@ -24,6 +24,7 @@ public class PostProcess {
                 BEGIN
 
                 INSERT INTO EZPAARSE_RESULT_DEPTS
+                        (RECORDID, RC, DEPT, MEMBERSHIP)
                 SELECT                  -- Associate rc_cd and department_cd for students in EZPAARSE_RESULTS
                         ez.recordid,
                         stu.rc_cd,
