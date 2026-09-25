@@ -48,8 +48,7 @@ public class PostProcess {
                                         INNER JOIN UD_DATA.ud_academic_plan_subplan ap ON en.academic_plan_subplan_key = ap.academic_plan_subplan_key
                                         INNER JOIN UD_DATA.ud_academic_group_rc_map rc ON rc.academic_group_cd = ap.academic_group_cd
                                 WHERE
-                                        dp.is_current = TRUE
-                                        AND cal.st_monthly_retain_flg = TRUE
+                                        cal.st_monthly_retain_flg = TRUE
                                         AND cal.full_dt > '2019-01-01'::DATE
                         ) stu ON ez.login = stu.username AND (ez.datetime BETWEEN stu.start_dt AND stu.end_dt)
                 WHERE
