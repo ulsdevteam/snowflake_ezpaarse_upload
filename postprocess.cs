@@ -37,16 +37,15 @@ public class PostProcess {
                                         st.username,
                                         DATEADD(second, -1, DATEADD(day, 1, cal.full_dt)) AS end_dt, 
                                         DATEADD(day, 1, ADD_MONTHS(cal.full_dt, -1)) AS start_dt,
-                                        dp.responsibility_center_cd AS rc_cd,
-                                        dp.department_cd,
+                                        rc.responsibility_center_cd AS rc_cd,
+                                        '00000' AS department_cd,
                                 FROM
                                         UD_DATA.ST_ENROLLMENT en
                                         INNER JOIN PITT_MD.calendar cal ON cal.calendar_key = en.calendar_key
                                         INNER JOIN UD_DATA.ud_term t ON t.term_key = en.term_key
                                         INNER JOIN UD_DATA.ud_student st ON st.student_key = en.student_key
                                         INNER JOIN UD_DATA.ud_academic_plan_subplan ap ON en.academic_plan_subplan_key = ap.academic_plan_subplan_key
-                                        INNER JOIN UD_DATA.ud_major_department md ON md.academic_plan_subplan_key = ap.academic_plan_subplan_key
-                                        INNER JOIN PITT_MD.department dp ON dp.department_cd = md.department_cd
+                                        INNER JOIN UD_DATA.ud_academic_group_rc_map rc ON rc.academic_group_cd = ap.academic_group_cd
                                 WHERE
                                         dp.is_current = TRUE
                                         AND cal.st_monthly_retain_flg = TRUE
