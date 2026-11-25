@@ -588,7 +588,7 @@ class ProcessEzpaarse
             }
             else
             {
-                //fileHandler.MoveToPending(pendingFileName);
+                fileHandler.MoveToPending(pendingFileName);
                 fileHandler.RemoveTempFiles(pendingFileName);
                 Console.WriteLine($"failed to execute sql for {pendingFileName}");
                 Environment.Exit(1);
