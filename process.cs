@@ -509,7 +509,7 @@ class CommandList : ICommandList
                     $31::NUMBER(7,4) AS geoip_latitude,
                     $32::NUMBER(7,4) AS geoip_longitude,
                     $33::CHAR(15) AS host,
-                    $34::CHAR(15) AS ezproxy_session,
+                    $34::CHAR(31) AS ezproxy_session,
                     SUBSTR($35, 1, 1024) AS url,
                     $36::NUMBER(3) AS status,
                     $37::NUMBER(10) AS size
